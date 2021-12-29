@@ -11,6 +11,6 @@ The S1_DADA2 pipeline for bacteria V3V4_2_final contains the script that outline
 
 The Tab_Unifrac_test2 file contains the frequency table of all taxa found in the samples with their relative abundance for each sample and with singleton taxa removed. This datafile has been used for the computation of the Unifrac distances and the subsequent multivariate analysis.
 
-The frequency table excel sheet contains the frequency table of all taxa found in the samples with their absolute abundance for each sample and with the taxonomic classification of each taxon found in the data. This dataset is the outcome that is obtained after the DADA2 pipeline and the removal of potential contaminants through decontam.
+The frequency table file contains the frequency table of all taxa found in the samples with their absolute abundance for each sample and with the taxonomic classification of each taxon found in the data. This dataset is the outcome that is obtained after the DADA2 pipeline and the removal of potential contaminants through decontam.
 
 The metadata file contains the corresponding metadata of this project.
