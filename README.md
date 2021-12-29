@@ -1,7 +1,7 @@
 # tephritid_microbiome_host_switch_project
 Contains the scripts and data tables used in the analysis of microbiome data from a project on changes in the microbiome of the tephritid Z. cucurbitae when feeding on non-cucurbit host plants compared to cucurbit host plants. Raw sequence data has been deposited at the European Nucleotide archive. 
 
-The script outlines the DADA2 pipeline (Callahan et al., 2016) that was used to process raw sequence reads, the decontam pipeline used to remove potential contaminants and the subsequent statistical analyses that have been conducted on the processed data. The subsequent analysis includes: 
+The S1_DADA2 pipeline for bacteria V3V4_2_final contains the script that outlines the DADA2 pipeline (Callahan et al., 2016) that was used to process raw sequence reads, the decontam pipeline used to remove potential contaminants and the subsequent statistical analyses that have been conducted on the processed data. The subsequent analysis includes: 
          1. the identification of core microbial taxa using the AU-test of Hester et al. (2016).
          2. the univariate analysis of diversity metrics (ACE, Inverse Simpson and Faith's PD) through linear mixed models. 
          3. the computation of Generalized and Unweighted Unifrac distances on the dataset with singleton taxa filtered (as suggested by Chakrabarti et al., 2016, Clarke et al., 2019) and were the abundance of bacteria was converted into proportions (McKnight et al., 2019). These distances were subsequently used for multivariate analysis with PERMANOVA analysis using PRIMER7. 
