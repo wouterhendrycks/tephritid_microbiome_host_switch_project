@@ -1,0 +1,551 @@
+#DADA2 For amplicon sequencing of V3-V4 16S rRNA genes (Bacteria) 
+
+##Introduction and package load
+Instead of working with Uparse for OTU clustering, we will make use of DADA2 for identifying sequence variants. DADA2 will infer exact sequence variants from the data. 
+To use DADA2, we will first load some libraries. 
+
+```{r package_load, echo=FALSE}
+#set local database to use for taxonomy assignment
+taxdata<-"C:\Users\Gebruiker\Documents\phd\silva_nr_v128_train_set.fa"
+speciesdata<-"C:\Users\Gebruiker\Documents\phd\DADA2_core_sets/silva_species_assignment_v128.fa"
+
+#LOAD PACKAGES
+#load DADA2
+library(dada2)
+library(phyloseq)
+library(ggplot2)
+```
+
+##Preprocessing and quality check
+After preprocessing the samples, we will first check the quality of the samples. 
+First we read in the names of the fastq files, and perform some string manipulation to get lists of the forward and reverse fastq files in matched order:
+
+```{r preprocessing}
+#Choose the working directory you want to work in
+setwd("C:\Users\Gebruiker\Documents\HN00120363\")
+
+#Set the path. Preferably, this is the same as your working directory
+path <- "C:/Users/Gebruiker\Documents\HN00120363\"
+
+#make variables with sample names and forward and reverse reads (in the same order)
+#Sort ensures forward/reverse reads are in same order
+fnFs <- sort(list.files(path, pattern="-1.fq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="-2.fq", full.names = TRUE))
+
+#Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 2)
+sample.names <- sapply(strsplit(sample.names,"[.]"), `[`, 1)
+
+#Count the number of reads in each file (Joran)
+
+```
+
+Second, we can check the quality of our samples by using `rplotQualityProfile`. Here we will check the quality of the first two samples, both for the forward reads (fnFs) and for the reverse reads (fnRs). In addition, you can check the quality of the samples making use of **FastQC**.
+
+```{r qualityprofiles}
+plotQualityProfile(fnFs[1:6])
+plotQualityProfile(fnRs[55:63])
+```
+
+##Filtering and trimming
+
+Assign the filenames 
+```{r assign_filenames}
+filt_path <- file.path(path, "filtered_all") # Place filtered files in filtered_all/ subdirectory
+filtFs <- file.path(filt_path, paste0(sample.names, "_F_filt.fastq.gz")) #make name for forward filtered files
+names(filtFs) <- sample.names #necessary for the dereplication and merging step
+filtRs <- file.path(filt_path, paste0(sample.names, "_R_filt.fastq.gz")) #make name for reverse filtered files
+names(filtRs) <- sample.names
+```
+
+For the filtering, we’ll use standard filtering parameters: maxN=0 (DADA2 requires no Ns), truncQ=2 and rm.phix=TRUE. maxEE will be set at 3, whereas standard this is set on 2. Here we will use a value of 3 to better compare with the Uparse pipeline (where a value of 3 is chosen as a standard). The maxEE parameter sets the maximum number of “expected errors” allowed in a read, which is a better filter than simply averaging quality scores.
+
+```{r filtering_trimming}
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(263,240),
+              maxN=0, maxEE=c(3,3), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=TRUE) # On Windows set multithread=FALSE
+head(out)
+dim(out)
+plotQualityProfile(filtFs[1:6])
+plotQualityProfile(filtRs[55:63])
+
+barplot(out[,2])
+#barplot(out2[,2])
+```
+
+##Estimate the error rates
+The DADA2 algorithm depends on a parametric error model (err) and every amplicon dataset has a different set of error rates. The learnErrors method learns the error model from the data, by alternating estimation of the error rates and inference of sample composition until they converge on a jointly consistent solution. As in many optimization problems, the algorithm must begin with an initial guess, for which the maximum possible error rates in this data are used (the error rates if only the most abundant sequence is correct and all the rest are errors).
+
+
+```{r error_estimation, echo = FALSE}
+errF <- learnErrors(filtFs, nread=1e6, multithread=TRUE)
+errR <- learnErrors(filtRs, nread=1e6, multithread=TRUE)
+```
+
+```{r error_plot, eval=FALSE}
+plotErrors(errF, nominalQ=TRUE)
+plotErrors(errR, nominalQ=TRUE) 
+```
+
+>**Note** Parameter learning is computationally intensive, so by default the *learnErrors* function uses only a subset of the data (the first 1M reads). If the plotted error model does not look like a good fit, try increasing the nreads parameter to see if the fit improves.
+
+
+##Dereplication, Inferring sequence variants and merging each sample
+Dereplication combines all identical sequencing reads into “unique sequences” with a corresponding “abundance”: the number of reads with that unique sequence. Dereplication substantially reduces computation time by eliminating redundant comparisons.
+
+
+```{r dereplication}
+mergers <- vector("list", length(sample.names))	#initate a list where the final data will be stored
+names(mergers) <- sample.names
+for(sam in sample.names) {			#for each sample, do the commands in this loop
+  cat("Processing:", sam, "\n")
+    derepF <- derepFastq(filtFs[[sam]])					#dereplication of forward reads
+    ddF <- dada(derepF, err=errF, multithread=TRUE)		#inferring sequence variants of forward reads
+    derepR <- derepFastq(filtRs[[sam]])					#dereplication of reverse reads
+    ddR <- dada(derepR, err=errR, multithread=TRUE)		#inferring sequence variants of forward reads
+    merger <- mergePairs(ddF, derepF, ddR, derepR)		#merge forward and reverse reads
+    mergers[[sam]] <- merger							#save merged reads in the list
+}
+rm(derepF); rm(derepR)
+```
+
+##Construct sequence table
+
+We can now construct a sequence table of our samples, a higher-resolution version of the OTU table produced by traditional methods. This table can be saved as an RDS file. 
+
+```{r sequence_table}
+#make a sequence table of the merged reads with the counts per sample
+seqtab <- makeSequenceTable(mergers)		
+
+#look into the dimensions of your table
+dim(seqtab)
+sum(seqtab)
+#Inspect distribution of sequence length
+table(nchar(getSequences(seqtab)))
+
+#save the sequence table as an RDS file, change the name according to the run
+saveRDS(seqtab, "C:\Users\Gebruiker\Documents\masterthesis\Dada2_All/seqtab_Microbioom_All.rds") 
+```
+
+##Remove chimeras
+The core dada method removes substitution and indel errors, but chimeras remain. Fortunately, the accuracy of the sequences after denoising makes identifying chimeras simpler than it is when dealing with fuzzy OTUs: all sequences which can be exactly reconstructed as a bimera (two-parent chimera) from more abundant sequences.
+
+```{r chimera_removal}
+#R code in case of using a sequence table from a single run
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+
+#R code in case of using a merged sequence table from several sequencing runs
+#seqtab <- removeBimeraDenovo(st.all, method="consensus", multithread=TRUE)
+
+dim(seqtab.nochim)
+sum(seqtab.nochim)
+sum(seqtab.nochim)/sum(seqtab) #% of reads remained after removeBimeraDenovo() although 50% of the unique variants were removed
+#save the sequence table as an RDS file, change the name according to the run
+saveRDS(seqtab.nochim, "C:/Users/whendrycks/Documents/seqtab.nochim_All.rds") 
+```
+
+##Taxonomy assignment
+
+In the last step, we are going to add taxonomy to the different sequence variants.For now we use SILVA 132 instead of 138 as this still gives trouble in DADA2 but this might be updated soon.  
+
+```{r taxonomy_assignment}
+setwd("C:/Users/whendrycks/Documents")
+tax <- assignTaxonomy(seqtab.nochim, "C:/Users/whendrycks/Documents/silva_nr_v132_train_set.fa.gz", multithread=TRUE, tryRC=TRUE )#SILVA v128; if only very few hits are found, set tryRC=FALSE
+#tax<- addSpecies(tax, "C:\Users\Gebruiker\Documents\masterthesis\silva_species_assignment_v132.fa")#file with species name is available at the dada2 website
+# Write resulting sequence table to disk in RDS format
+saveRDS(seqtab.nochim, "seqtab.nochim_All.rds") # CHANGE ME to where you want sequence table saved
+saveRDS(tax, "C:/Users/whendrycks/Documents/taxonomy_All.rds") # CHANGE ME ...
+
+```
+
+##change rownames of seqtabnochim to samplenames based on metadatafile
+```{r change names}
+samplenames<-read.table("C:\Users\Gebruiker\Documents\masterthesisDada2_All/Metadata file.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
+#removes spaces
+samplenames$Names<-gsub(" ","", samplenames$Names)
+
+#create empty vector
+v<-NULL
+
+# Save the indices of the rows for each name in samplenames$Names
+for(x in samplenames$Names){
+v<-c(v,which( rownames(seqtab.nochim) == x))
+}
+
+# for each indice replace the rowname by the corresponding code
+for(w in v){
+rownames(seqtab.nochim)[w]<-samplenames$Code[which(w == v)] 
+}
+```
+##Write taxonomy table to output txt file
+
+
+```{r count_table}
+dim(seqtab.nochim)
+dim(tax)
+
+#transpose table
+table<-as.data.frame(t(seqtab.nochim))
+
+#remove rownames
+rownames(table)<-NULL
+
+#add extra columns containing taxa, for this, first transform the taxa object to a data frame
+taxadf<-as.data.frame(tax)
+table$Kingdom<-taxadf$Kingdom
+table$Phylum<-taxadf$Phylum
+table$Class<-taxadf$Class
+table$Order<-taxadf$Order
+table$Family<-taxadf$Family
+table$Genus<-taxadf$Genus
+table$Species<-taxadf$Species
+
+#add extra column containing sequences
+table$seq<-as.vector(colnames(seqtab.nochim))
+table$seq
+
+#write table to output file
+write.table(table,file="HN00120363_microbiome_All_Count_table_with_taxonomy.txt",sep="\t",col.names=TRUE,row.names=FALSE,quote=FALSE)
+
+
+```contaminantion filtering
+#In this step we remove contamination reads that might have been introduced in the samples during the wet lab work using the negative control. To do this we deploy the recently developed microDecon algorithm as this algorithm takes into account that ASVs detected in the negative control might also be present naturally in other samples. As such it does not simply remove ASV but corrects the read count of an ASV in a sample based upon the proportion of the ASV in the negative control.
+
+install.packages("devtools") #Installs devtools (if not already installed)
+devtools::install_github("donaldtmcknight/microDecon") #Installs microDecon
+library(microDecon)
+contam = read.table() ##modified count table by adding a first column containing OTU identity and by placing the Blank samples colums right next to the OTU identity colum. Taxonomy removed or reduced to one colum. Required by microDecon.
+contamdone<-decon(data=contam, numb.blanks=1, numb.ind=c(4, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 5, 5, 5, 5, 5, 5, 1), taxa=F) #numb.blanks specifies the number of negative controls, numb.ind specifies the sample sizes of different groups of samples (e.g. treatments, locations etc.). 
+contamdone2<-contamdone$decon.table #with this step we can see which ASV have been removed due to too low counts in samples compared to the negative control and how many counts have been subtracted for the ASVs that have not been removed.
+
+```{r frequency_table}
+table2 <- read.delim("~/HN00120363 count table phd contaminant filtering2.txt") ##contaminant and chloroplast filtered
+#calculate number of samples, store sample names in list
+samplenumber<-ncol(table2)-7
+samples<-colnames(table2)[1:samplenumber]
+
+#add new columns with percentages
+freq_table <- data.frame(matrix(nrow = nrow(table2), ncol=samplenumber, dimnames = list(c(rownames(table2)), c(colnames(table2[1:samplenumber])))))
+
+#calculate frequencies
+for (i in 1:samplenumber){
+  freq_table[,i] <- table2[,i]/colSums(table2[1:samplenumber])[i]
+}
+save(freq_table, file = "C:/Users/whendrycks/Documents/HN00120363freq_table.RData")
+
+
+#add species information to the frequency table. Ensure proper order!
+freq_table$Kingdom<-taxadf$Kingdom
+freq_table$Phylum<-taxadf$Phylum
+freq_table$Class<-taxadf$Class
+freq_table$Order<-taxadf$Order
+freq_table$Family<-taxadf$Family
+freq_table$Genus<-taxadf$Genus
+
+#write to new output table
+write.table(freq_table,file="HN00120363_Microbiome_final_table_with_pct.txt",sep="\t",col.names=TRUE,row.names=FALSE,quote=FALSE)	#CHANGE ME....
+```
+##Export sequences to fasta file
+
+it may be interesting to have a fastafile with all sequence variants for other applications
+
+```{r fasta_file}
+library(seqRFLP)
+dataframe2fas(rownames(table),file = "seqtab_nochim_sequences.fasta")
+
+```
+
+##calculate generalized unifrac distances
+
+```{r generate tree}
+library(GUniFrac)
+library(phangorn)
+library(magrittr)
+library(ade4)
+library("DECIPHER")
+library("ape")
+# Add numbers as colnames instead of sequences
+# View(seqtab.nochim)
+
+# Write all sequences to a fasta file with the ID's corresponding to the rownumber
+uniquesToFasta(Tab_UniFrac_test2,"seqtab_nochim_reunion2019.fasta",ids = (1:ncol(Tab_UniFrac_test2)))
+
+# Read the fasta file and put it in a variable
+seqtab_nochim_reunion2019.fasta<-readAAStringSet("seqtab_nochim_reunion2019.fasta")
+
+#An alignment is performed and processors are set to five to spead up the proces but not overload the server.
+# If you have enough processors available you can elevate the number
+Aligned_seq_rarified<-AlignSeqs(seqtab_nochim_reunion2019.fasta,processors = 5)
+
+# The aligned sequences are written to a file to be used by FASTREE
+# The file is written to the current working directory
+writeXStringSet(Aligned_seq_rarified,"Aligned_seq_reunion2019_fasta")
+
+# This gives the command in the terminal to build an unrooted tree using the allignment file.
+# This command is only functional on a unix server which has the FastTree installed and added to the PATH, I ran FastTree directly.
+system("FastTree -gtr -nt Aligned_seq_rarified_fasta > Aligned_tree_rarified")
+
+# Load in the unrooted tree (requires ape)
+tree_reunion2019_unrooted<-read.tree("Aligned_tree_reunion2019")
+
+# Check if the tree is fine (unrooted)
+# tree_unrooted
+
+# Use midpoint rooting to transform the tree to a rooted tree (requires phangorn)
+tree_reunion2019_rooted<-midpoint(tree_reunion2019_unrooted)
+
+# Write the tree to a file to be used in Unifrac
+write.tree(tree_reunion2019_rooted,"Aligned_tree_reunion2019_rooted.tre")
+```
+
+```{r calculate Unifrac}
+# Calculate the UniFracs
+Gunifracs <- GUniFrac(as.matrix(t(Tab_Unifrac_test2[,c(1:57)])), tree_reunion2019_rooted, alpha=c(0, 0.5, 1))$unifracs
+dw_rarified <- Gunifracs[, , "d_1"] # Weighted UniFrac
+du_rarified <- Gunifracs[, , "d_UW"] # Unweighted UniFrac
+dv_rarified <- Gunifracs[, , "d_VAW"] # Variance adjusted weighted UniFrac
+d0_rarified <- Gunifracs[, , "d_0"]      # GUniFrac with alpha 0
+d5_rarified <- Gunifracs[, , "d_0.5"]    # GUniFrac with alpha 0.5 has nothing to do with statistics
+
+```
+
+##Define grouping variables for subsequent plots and analyses
+samplenames.fly <- colnames(data2)
+lifestage=factor(unlist(lapply(strsplit(samplenames.fly,split="_"),function(x) x[1])))
+location=factor(unlist(lapply(strsplit(samplenames.fly,split="_"),function(x) x[2])))
+generation=factor(unlist(lapply(strsplit(samplenames.fly,split="_"),function(x) x[3])))
+host=factor(unlist(lapply(strsplit(samplenames.fly,split="_"),function(x) x[4])))
+lphg=factor(unlist(lapply(strtrim(samplenames.fly, 10),function(x) x[1])))
+host<-c(rep("S. melongela", 4), rep("C. grandis", 4), rep("C. sativus", 4), rep("S. melongela", 4), rep("C. grandis", 4), rep("C. sativus", 4), rep("S. melongela", 6), rep("C. grandis", 6), rep("C. sativus", 6), rep("S. melongela", 5), rep("C. grandis", 5), rep("C. sativus", 5))
+location<-c(rep("BP", 12), rep("M", 12), rep("BP", 18), rep("M", 15))
+hostlocation<-c(location, host)
+
+```
+
+##Make a barplot with taxonomic profiles
+
+```{r Barplot_taxonomy}
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+# Loading data
+data<-read.table("C:/Users/whendrycks/Documents/HN00120363_Microbiome_final_table_with_pct.txt",sep = "\t",header = T)
+rm(merged_data)
+
+# Sort by Genus/Order/Phyla name and sum values if Genus/Order/Phylum is mentioned more than once in original file
+merged_data<-aggregate(data[,1:94] , by=list(data$Genus),FUN=sum)
+# Set the Family names as rownames
+rownames(merged_data)<-merged_data$Group.1
+merged_data$Group.1<-NULL
+
+# calculate the sum of each row to determine the most abundant Genera/Orders/Phyla
+merged_data$col.sums<-apply(merged_data,1,sum)
+merged_data$col.sums<-apply(merged_data[ncol(merged_data)],1,function(x) x/(colSums(merged_data[ncol(merged_data)] )) )
+
+# Introduce a cutoff value and put all failing values in one group
+rare<-subset(merged_data,merged_data$col.sums<0.01)
+abundant<-subset(merged_data,merged_data$col.sums>=0.01)
+rare<-aggregate(rare,by=list(rare$col.sums<0.01),sum)
+rare$Group.1<-NULL
+rownames(rare)<-"Others"
+merged_data<-rbind(abundant,rare)
+
+# calculate number of NA => some sequences are not assigned to family level, and are not summed by the aggregate function; since abundance are relative, all values should sum up to 1
+not_available<-apply(merged_data,2,function(x) 1-sum(x))
+merged_data<-rbind(merged_data,not_available=not_available)
+
+# subset so that last column is not included
+# subsetting for adults
+merged_data<-merged_data[c(1:24)]
+# subsetting for larvae
+merged_data<-merged_data[c(25:57)]
+
+# Formatting dataframe for ggplot + adding Group factor to dataframe
+merged_data<-t(merged_data)
+lphg2<-host[c(1:24)]
+lphg2<-droplevels(lphg2)
+levels(lphg2)<-c("BP: GR1", "BP: GR2", "BP: GR3", "BP: GR4", "BP: GR5", "BP: GR6")
+merged_data<-melt(merged_data)
+merged_data<-cbind(lphg2, merged_data)
+colnames(merged_data)<-c("lphg2", "Var1", "Phylum", "value")
+
+# stacked barplot by ggplot2
+ggplot(data = merged_data, aes(x = lphg2, y = value, fill = Phylum)) + geom_col(position = "fill") + ggtitle("Phyla") + xlab("treatment") + ylab("Relative abundance")
+
+```
+##PCoA plot
+library(ggplot2)
+library(ggordiplots)
+
+#determine how many components there are and how much variance is explained by the first and second components
+cmd<-cmdscale(d5_rarified, k=2, eig=TRUE)
+(cmd$eig[1]+cmd$eig[2])/sum(cmd$eig[1:32])
+(cmd$eig[1])/sum(cmd$eig[1:32])
+(cmd$eig[2])/sum(cmd$eig[1:32])
+
+#Draw the PCoA using the ordiplot function to also draw confidence ellipses on the ordiplot
+cmd<-wcmdscale(d5_rarified_BP, k=2, eig=TRUE)
+ordiplot<-gg_ordiplot(cmd, groups=host, choices=c(1, 2), kind=c("se"), conf=0.95, show.groups="all", label=FALSE, pt.size=1.8)
+ordiplot<-ordiplot$plot + ggtitle("PCoA Generalized UniFracs larval microbiomes BP") + xlab("PCoA axis 1: 41.52% of variance explained") + ylab("PCoA axis 2: 22.40% of variance explained")
+ordiplot
+
+```
+
+##Univariate analysis of alpha diversity
+library(GAD)
+library(vegan)
+library(hilldiv)
+library(phia)
+library(ggpubr)
+
+#calculate ACE index
+table3<-t(table2)
+chao1vsACE<-estimateR(table3)
+
+#calculate inverse simpson index
+invsimpson<-diversity(table2, index="invsimpson")
+
+#calculate Faith's PD
+PD<-index_div(table2, tree_reunion2019_rooted, index="faith")
+
+#combine all metrics in one table
+chao1vsACE<-cbind(chao1vsACE, invsimpson, PD)
+
+#determine which factors are fixed and which factors are random
+host<-as.fixed(host)
+location<-as.random(location)
+
+#subset table for larvae or adults. Do the same for the factors host and location.
+chao1vsACE_larvae<-chao1vsACE[c(25:29, 31:35, 37:41, 43:57),] #for a balanced design
+chao1vsACE_adults<-chao1vsACE[c(1:24),]
+
+#analysis larvae
+lm1<-lm((chao1vsACE_larvae$S.ACE)^1/3~host+location+host:location)
+C.test(lm1)
+testInteractions(lm1, pairwise = "host", fixed = "location")
+
+lm1<-lm(log(chao1vsACE_larvae$invsimpson)~host+location+host:location)
+C.test(lm1)
+testInteractions(lm1, pairwise = "host", fixed = "location")
+
+lm1<-lm((chao1vsACE_larvae$PD)^1/3~host+location+host:location)
+C.test(lm1)
+testInteractions(lm1, pairwise = "host", fixed = "location")
+
+#analysis adult
+lm1<-lm(chao1vsACE_adult$S.ACE~host+location+host:location)
+C.test(lm1)
+testInteractions(lm1, pairwise = "host", fixed = "location")
+
+lm1<-lm(chao1vsACE_adult$invsimpson~host+location+host:location)
+C.test(lm1)
+testInteractions(lm1, pairwise = "host", fixed = "location")
+
+lm1<-lm(chao1vsACE_adult$PD~host+location+host:location)
+C.test(lm1)
+testInteractions(lm1, pairwise = "host", fixed = "location")
+
+#boxplots diversity metrics larvae
+p1<-ggplot(chao1vsACE_larvae, aes(x=Host_plant, y=S.ACE, fill=Host_plant)) + geom_boxplot() + ggtitle("Boxplot larval microbiomes ACE") + ylab("ACE") + xlab("Host plant") + facet_grid(. ~ Location) + scale_fill_discrete(name = "Host plant", labels = c(expression(italic("C. grandis")), expression(italic("C. sativus")), expression(italic("S. melongela")))) + theme(legend.text.align = 0)
+p2<-ggplot(chao1vsACE_larvae, aes(x=Host_plant, y=invsimpson, fill=Host_plant)) + geom_boxplot() + ggtitle("Boxplot larval microbiomes Inverse Simpson index") + ylab("Inverse Simpson index") + xlab("Host plant") + facet_grid(. ~ Location) + scale_fill_discrete(name = "Host plant", labels = c(expression(italic("C. grandis")), expression(italic("C. sativus")), expression(italic("S. melongela")))) + theme(legend.text.align = 0)
+p3<-ggplot(chao1vsACE_larvae, aes(x=Host_plant, y=PD, fill=Host_plant)) + geom_boxplot() + ggtitle("Boxplot larval microbiomes Faith's PD") + ylab("Faith's PD") + xlab("Host plant") + facet_grid(. ~ Location) + scale_fill_discrete(name = "Host plant", labels = c(expression(italic("C. grandis")), expression(italic("C. sativus")), expression(italic("S. melongela")))) + theme(legend.text.align = 0)
+ggarrange(p1, p2, p3, labels = c("A", "B", "C"), ncol = 2, nrow = 2)
+
+```
+
+##ALDEx2 analysis
+library(ALDEx2)
+library(pheatmap)
+library(ggplot2)
+library(ggpubr)
+
+#first properly define host for the proper pairwise comparison by subsetting the samples to only the samples for those two host comparisons
+host2<-host[c(25:36)]
+host2<-droplevels(host2)
+
+#calculate the aldex output. 1000 MC samples is necessary for accurate effect size estimation
+table3_clr<-aldex(Genera_NA[,25:36], conditions = host2, mc.samples = 1000, test="t", effect=TRUE, denom="all", verbose=TRUE)
+hist(table3_clr$effect)
+shapiro.test(table3_clr$effect)
+qqnorm(table3_clr$effect)
+qqline(table3_clr$effect)
+table3_clr<-rownames_to_column(table3_clr)
+effect<-filter(table3_clr, table3_clr$effect>1)
+effect2<-filter(table3_clr, table3_clr$effect<=-1)
+effect2<-rbind(effect, effect2)
+write.table(effect2,file="effect.txt",sep="\t",col.names=TRUE,row.names=FALSE,dec=",", quote=FALSE)
+#repeat for all pairwise comparisons of interest
+
+#heatmap differential abundance
+table3_clr<-aldex.clr(Genera_NA, conds = hostlocation, mc.samples = 1000, denom=rclr, verbose=TRUE)
+table8<-lapply(X=table3_clr@analysisData, FUN=rowMeans)
+table8<-as.data.frame(table8)
+table8<-table8[c("Acinetobacter", "Acetobacter", "Enterobacter", "Enterobacteriaceae_NA11", "Enterobacteriaceae_NA6", "Enterobacteriaceae_NA13", "Enterobacteriaceae_NA14", "Empedobacter", "Anaerosinus", "Anaerosporobacter", "Citrobacter", "Devosia", "Allorhizobium-Pararhizobium-Neorhizobium-Rhizobium", "Gluconobacter", "Leucobacter", "Ketogulonicigenium", "Lactococcus", "Novosphingobium", "Pantoea", "Peredibacter", "Pseudomonas", "Rahnella", "Tatumella", "Sphingobacterium"),]
+host_plant_family<-c(rep("Solanaceae", 6), rep("Cucurbitaceae", 12), rep("Solanaceae", 6), rep("Cucurbitaceae", 12))
+host_df<-cbind(host[c(25:57)], host_plant_family, location[c(25:57)])
+colnames(host_df) <- c("host", "host plant family", "location")
+rownames(host_df) <- colnames(table8)
+host_df<-as.data.frame(host_df)
+levels(host_df$host)<-c("C. grandis", "C. sativa", "S. melongela")
+color_heat = list(host = c("S. melongela" = "black", "C. grandis"="red", "C. sativa"="green"))
+newnames <- lapply(rownames(table8), function(x) bquote(italic(.(x))))
+pheatmap(table10, cutree_cols = 6, main = "Heatmap Most Differentially Abundant Genera Host", annotation_col = host_df, annotation_colors = color_heat, labels_row = as.expression(newnames))
+
+#boxplots differential abundance
+p1<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Acinetobacter") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p2<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Acetobacter") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p3<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Allorhizobium-Pararhizobium_Neorhizobium_Rhizobium") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p4<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Anaerosinus") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p5<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Enterobacter") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p6<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Enterobacteriaceae_NA11") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p7<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Enterobacteriaceae_NA13") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p8<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Rahnella") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+ggarrange(p1, p2, p3, p4, p5, p6, p7, p8, labels = c("A", "B", "C", "D", "E", "F", "G", "H"), ncol = 2, nrow = 4)
+
+```
+#Abundance-Ubiquity test. Code is translated from a matlab script from Hester et al. 2016
+library(fitODBOD)
+library(zipfR)
+library(lattice)
+library(ggplot2)
+
+ibeta(x, a, b) <- function(x, a, b){
+pbeta(x, a, b)*beta(a, b)
+}
+AU_STATS<-function(x, y){
+    ss = x
+    abun = y
+    m = length(ss)
+    n = length(abun)
+    x = matrix(rep(ss, each=n), nrow = n)
+    y = matrix(rep(abun, m), nrow = n)
+    PI = (1-((1-y)^x))
+    E = sum(PI)
+    s = sum(PI^2)
+    V = E-s
+    p0 = s/E
+    m0 = ((E^2)/s)
+    stat<-cbind(E, s, V, p0, m0)
+    return(stat)
+}
+
+ss <- Ps[1:2]
+result<-NULL
+for (i in as.data.frame(t(freq_table[1:10, 1:2]))){
+abun <- mean(i)
+k <- sum(i>0)
+stat<-AU_STATS(ss, abun)
+m0_minus_k<-abs(stat[,"m0"]-k)
+k1<-k+1
+CI<-Ibeta(stat[,"p0"],k1,m0_minus_k)
+stat<-cbind(abun, k, stat, CI)
+result<-rbind(result, stat)
+}
+
+plot(result[,"k"], log10(result[,"abun"]))
+plot(result[,"E"], log10(result[,"abun"]))
+
+xyplot(log10(abun)~k+E, data = result)
+
+result<-as.data.frame(result)
+ggplot(result, aes(x = log10(abun))) + geom_point(aes(y = k), colour ="red") + geom_line(aes(y = E), colour ="green") + coord_flip()
