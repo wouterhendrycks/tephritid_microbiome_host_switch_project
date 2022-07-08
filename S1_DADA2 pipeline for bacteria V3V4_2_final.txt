@@ -269,10 +269,10 @@ library("ape")
 # View(seqtab.nochim)
 
 # Write all sequences to a fasta file with the ID's corresponding to the rownumber
-uniquesToFasta(Tab_UniFrac_test2,"seqtab_nochim_reunion2019.fasta",ids = (1:ncol(Tab_UniFrac_test2))) ##Tab_Unifrac_test2 is generated in excel by removing singletons, putting sequences in rowname, removing other taxonomic information, replacing sample names by numbers and transposing the table. 
+uniquesToFasta(Tab_UniFrac_test2,"seqtab_nochim_reunion20192.fasta",ids = (1:ncol(Tab_UniFrac_test2))) ##Tab_Unifrac_test2 is generated in excel by removing singletons, putting sequences in rowname, removing other taxonomic information, replacing sample names by numbers and transposing the table. 
 
 # Read the fasta file and put it in a variable
-seqtab_nochim_reunion2019.fasta<-readAAStringSet("seqtab_nochim_reunion2019.fasta")
+seqtab_nochim_reunion2019.fasta<-readAAStringSet("seqtab_nochim_reunion20192.fasta")
 
 #An alignment is performed and processors are set to five to spead up the proces but not overload the server.
 # If you have enough processors available you can elevate the number
