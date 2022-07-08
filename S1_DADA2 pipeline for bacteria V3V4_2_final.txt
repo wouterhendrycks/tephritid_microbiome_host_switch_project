@@ -61,8 +61,8 @@ names(filtRs) <- sample.names
 For the filtering, we’ll use standard filtering parameters: maxN=0 (DADA2 requires no Ns), truncQ=2 and rm.phix=TRUE. maxEE will be set at 3, whereas standard this is set on 2. Here we will use a value of 3 to better compare with the Uparse pipeline (where a value of 3 is chosen as a standard). The maxEE parameter sets the maximum number of “expected errors” allowed in a read, which is a better filter than simply averaging quality scores.
 
 ```{r filtering_trimming}
-out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(263,240),
-              maxN=0, maxEE=c(3,3), truncQ=2, rm.phix=TRUE,
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, trimLeft=c(17, 21), truncLen=c(260,240),
+              maxN=0, maxEE=c(1,1), truncQ=2, rm.phix=TRUE,
               compress=TRUE, multithread=TRUE) # On Windows set multithread=FALSE
 head(out)
 dim(out)
@@ -132,7 +132,7 @@ The core dada method removes substitution and indel errors, but chimeras remain.
 
 ```{r chimera_removal}
 #R code in case of using a sequence table from a single run
-seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE, minFoldParentOverAbundance=2)
 
 #R code in case of using a merged sequence table from several sequencing runs
 #seqtab <- removeBimeraDenovo(st.all, method="consensus", multithread=TRUE)
@@ -217,9 +217,10 @@ library(microDecon)
 contam = read.table() ##modified count table by adding a first column containing OTU identity and by placing the Blank samples colums right next to the OTU identity colum. Taxonomy removed or reduced to one colum. Required by microDecon.
 contamdone<-decon(data=contam, numb.blanks=1, numb.ind=c(4, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 5, 5, 5, 5, 5, 5, 1), taxa=F) #numb.blanks specifies the number of negative controls, numb.ind specifies the sample sizes of different groups of samples (e.g. treatments, locations etc.). 
 contamdone2<-contamdone$decon.table #with this step we can see which ASV have been removed due to too low counts in samples compared to the negative control and how many counts have been subtracted for the ASVs that have not been removed.
+write.table(contamdone2,file="HN00120363 count table phd contaminant filtering.txt",sep="\t",col.names=TRUE,row.names=FALSE,quote=FALSE)
 
 ```{r frequency_table}
-table2 <- read.delim("~/HN00120363 count table phd contaminant filtering2.txt") ##contaminant and chloroplast filtered
+table2 <- read.delim("~/HN00120363 count table phd contaminant filtering2.txt") ##contaminant and chloroplast/mitochondria filtered. Chloroplasts/mitochondria were removed in excel not in R.
 #calculate number of samples, store sample names in list
 samplenumber<-ncol(table2)-7
 samples<-colnames(table2)[1:samplenumber]
@@ -268,7 +269,7 @@ library("ape")
 # View(seqtab.nochim)
 
 # Write all sequences to a fasta file with the ID's corresponding to the rownumber
-uniquesToFasta(Tab_UniFrac_test2,"seqtab_nochim_reunion2019.fasta",ids = (1:ncol(Tab_UniFrac_test2)))
+uniquesToFasta(Tab_UniFrac_test2,"seqtab_nochim_reunion2019.fasta",ids = (1:ncol(Tab_UniFrac_test2))) ##Tab_Unifrac_test2 is generated in excel by removing singletons, putting sequences in rowname, removing other taxonomic information, replacing sample names by numbers and transposing the table. 
 
 # Read the fasta file and put it in a variable
 seqtab_nochim_reunion2019.fasta<-readAAStringSet("seqtab_nochim_reunion2019.fasta")
@@ -311,11 +312,6 @@ d5_rarified <- Gunifracs[, , "d_0.5"]    # GUniFrac with alpha 0.5 has nothing t
 
 ##Define grouping variables for subsequent plots and analyses
 samplenames.fly <- colnames(data2)
-lifestage=factor(unlist(lapply(strsplit(samplenames.fly,split="_"),function(x) x[1])))
-location=factor(unlist(lapply(strsplit(samplenames.fly,split="_"),function(x) x[2])))
-generation=factor(unlist(lapply(strsplit(samplenames.fly,split="_"),function(x) x[3])))
-host=factor(unlist(lapply(strsplit(samplenames.fly,split="_"),function(x) x[4])))
-lphg=factor(unlist(lapply(strtrim(samplenames.fly, 10),function(x) x[1])))
 host<-c(rep("S. melongela", 4), rep("C. grandis", 4), rep("C. sativus", 4), rep("S. melongela", 4), rep("C. grandis", 4), rep("C. sativus", 4), rep("S. melongela", 6), rep("C. grandis", 6), rep("C. sativus", 6), rep("S. melongela", 5), rep("C. grandis", 5), rep("C. sativus", 5))
 location<-c(rep("BP", 12), rep("M", 12), rep("BP", 18), rep("M", 15))
 hostlocation<-c(location, host)
@@ -377,17 +373,47 @@ ggplot(data = merged_data, aes(x = lphg2, y = value, fill = Phylum)) + geom_col(
 library(ggplot2)
 library(ggordiplots)
 
+#subset unifrac matrices for only relevant comparisons
+d5_rarified_larvae<-d5_rarified[c(35:52, 80:94), c(35:52, 80:94)]
+du_rarified_larvae<-du_rarified[c(35:52, 80:94), c(35:52, 80:94)]
+d5_rarified_adults<-d5_rarified[c(1:12, 17:28), c(1:12, 17:28)]
+du_rarified_adults<-du_rarified[c(1:12, 17:28), c(1:12, 17:28)]
+
 #determine how many components there are and how much variance is explained by the first and second components
-cmd<-cmdscale(d5_rarified, k=2, eig=TRUE)
+cmd<-cmdscale(d5_rarified_larvae, k=2, eig=TRUE)
 (cmd$eig[1]+cmd$eig[2])/sum(cmd$eig[1:32])
 (cmd$eig[1])/sum(cmd$eig[1:32])
 (cmd$eig[2])/sum(cmd$eig[1:32])
 
 #Draw the PCoA using the ordiplot function to also draw confidence ellipses on the ordiplot
-cmd<-wcmdscale(d5_rarified_BP, k=2, eig=TRUE)
+cmd<-wcmdscale(d5_rarified_larvae, k=2, eig=TRUE)
 ordiplot<-gg_ordiplot(cmd, groups=host, choices=c(1, 2), kind=c("se"), conf=0.95, show.groups="all", label=FALSE, pt.size=1.8)
-ordiplot<-ordiplot$plot + ggtitle("PCoA Generalized UniFracs larval microbiomes BP") + xlab("PCoA axis 1: 41.52% of variance explained") + ylab("PCoA axis 2: 22.40% of variance explained")
+ordiplot<-ordiplot$plot + ggtitle("PCoA Generalized UniFracs larval microbiomes") + xlab("PCoA axis 1: 31.71% of variance explained") + ylab("PCoA axis 2: 27.32% of variance explained")
 ordiplot
+
+#extract the ellipse coordinates so that they can be copied on a ggplot
+df_ellipse <- ordiplot$df_ellipse
+df_ellipse_BP_Au <- subset(df_ellipse, Group == "1", droplevels= TRUE)
+df_ellipse_BP_Co <- subset(df_ellipse, Group == "2", droplevels= TRUE)
+df_ellipse_BP_Cu <- subset(df_ellipse, Group == "3", droplevels= TRUE)
+df_ellipse_M_Au <- subset(df_ellipse, Group == "4", droplevels= TRUE)
+df_ellipse_M_Co <- subset(df_ellipse, Group == "5", droplevels= TRUE)
+df_ellipse_M_Cu <- subset(df_ellipse, Group == "6", droplevels= TRUE)
+
+#Make a new dataframe for constructing the ggplot
+plottest<-as.data.frame(cbind(cmd$points, host[c(25:29, 31:35, 37:41, 43:57)], location[c(25:29, 31:35, 37:41, 43:57)]))
+plottest$Dim1<-as.character(plottest$Dim1)
+plottest$Dim1<-as.numeric(plottest$Dim1)
+plottest$Dim2<-as.character(plottest$Dim2)
+plottest$Dim2<-as.numeric(plottest$Dim2)
+
+#make a ggplot with ellipses, custom colours and custom shapes
+ggplot(data = plottest, aes(x = Dim1, y = Dim2)) + geom_point(aes(Dim1, Dim2, colour = factor(V3), shape = factor(V4))) + labs(colour = "Host plant", shape = "Location") 
++ geom_path(data=df_ellipse_BP_Au, aes(x=x, y=y), color="Black", linetype="solid") + geom_path(data=df_ellipse_M_Au, aes(x=x, y=y), color="Black", linetype="dashed") 
++ geom_path(data=df_ellipse_BP_Co, aes(x=x, y=y), color="Cyan3", linetype="solid") + geom_path(data=df_ellipse_M_Co, aes(x=x, y=y), color="Cyan3", linetype="dashed") 
++ geom_path(data=df_ellipse_BP_Cu, aes(x=x, y=y), color="Gold2", linetype="solid") + geom_path(data=df_ellipse_M_Cu, aes(x=x, y=y), color="Gold2", linetype="dashed") 
++ ggtitle("PCoA Generalized UniFracs larval microbiomes") + xlab("PCoA axis 1: 31.71% of variance explained") + ylab("PCoA axis 2: 27.32% of variance explained") 
++ scale_colour_manual('Host plant', labels = c("*C. grandis*", "*C. sativus*", "*S. melongena*"), values = c('red', 'limegreen', 'black')) + theme(legend.text = ggtext::element_markdown())
 
 ```
 
@@ -417,33 +443,34 @@ location<-as.random(location)
 
 #subset table for larvae or adults. Do the same for the factors host and location.
 chao1vsACE_larvae<-chao1vsACE[c(25:29, 31:35, 37:41, 43:57),] #for a balanced design
-chao1vsACE_adults<-chao1vsACE[c(1:24),]
+chao1vsACE_adults<-chao1vsACE[c(1:12, 17:28),]
+hostlm_larvae<-host[c(35:52, 80:94)]
+locationlm_larvae<-location[c(35:52, 80:94)]
+group<-host[c(1:12, 17:28)]
+locationlm_adult<-location[c(1:12, 17:28)]
 
 #analysis larvae
-lm1<-lm((chao1vsACE_larvae$S.ACE)^1/3~host+location+host:location)
+lm1<-lm((chao1vsACE_larvae$S.ACE)^1/3~hosthostlm_larvae+locationlm_larvae+hosthostlm_larvae:locationlm_larvae)
 C.test(lm1)
-testInteractions(lm1, pairwise = "host", fixed = "location")
+testInteractions(lm1, pairwise = "hostlm_larvae", fixed = "locationlm_larvae")
 
-lm1<-lm(log(chao1vsACE_larvae$invsimpson)~host+location+host:location)
+lm1<-lm(log(chao1vsACE_larvae$invsimpson)~hostlm_larvae+locationlm_larvae+hostlm_larvae:locationlm_larvae)
 C.test(lm1)
-testInteractions(lm1, pairwise = "host", fixed = "location")
+testInteractions(lm1, pairwise = "hostlm_larvae", fixed = "locationlm_larvae")
 
-lm1<-lm((chao1vsACE_larvae$PD)^1/3~host+location+host:location)
+lm1<-lm((chao1vsACE_larvae$PD)^1/3~hostlm_larvae+location+hostlm_larvae:location)
 C.test(lm1)
-testInteractions(lm1, pairwise = "host", fixed = "location")
+testInteractions(lm1, pairwise = "hostlm_larvae", fixed = "locationlm_larvae")
 
 #analysis adult
-lm1<-lm(chao1vsACE_adult$S.ACE~host+location+host:location)
+lm1<-lm(chao1vsACE_adult$S.ACE~locationlm_adult+locationlm_adult|group)
 C.test(lm1)
-testInteractions(lm1, pairwise = "host", fixed = "location")
 
-lm1<-lm(chao1vsACE_adult$invsimpson~host+location+host:location)
+lm1<-lm(chao1vsACE_adult$invsimpson~locationlm_adult+locationlm_adult|group)
 C.test(lm1)
-testInteractions(lm1, pairwise = "host", fixed = "location")
 
-lm1<-lm(chao1vsACE_adult$PD~host+location+host:location)
+lm1<-lm(chao1vsACE_adult$PD~locationlm_adult+locationlm_adult|group)
 C.test(lm1)
-testInteractions(lm1, pairwise = "host", fixed = "location")
 
 #boxplots diversity metrics larvae
 p1<-ggplot(chao1vsACE_larvae, aes(x=Host_plant, y=S.ACE, fill=Host_plant)) + geom_boxplot() + ggtitle("Boxplot larval microbiomes ACE") + ylab("ACE") + xlab("Host plant") + facet_grid(. ~ Location) + scale_fill_discrete(name = "Host plant", labels = c(expression(italic("C. grandis")), expression(italic("C. sativus")), expression(italic("S. melongela")))) + theme(legend.text.align = 0)
@@ -460,8 +487,11 @@ library(ggplot2)
 library(ggpubr)
 
 #first properly define host for the proper pairwise comparison by subsetting the samples to only the samples for those two host comparisons
-host2<-host[c(25:36)]
+host2<-host[c(25:36)] #change the range between the brackets in function of the groups you wish to compare with each other
 host2<-droplevels(host2)
+
+#generate Genera_NA table in excel by summing ASVs of the same identified genus in every sample, ASVs belonging to unidentified genera are not lumped together but receive an unique identifier 
+composed of the lowest identified taxonomic level + _NA. Table used is the 
 
 #calculate the aldex output. 1000 MC samples is necessary for accurate effect size estimation
 table3_clr<-aldex(Genera_NA[,25:36], conditions = host2, mc.samples = 1000, test="t", effect=TRUE, denom="all", verbose=TRUE)
@@ -477,8 +507,8 @@ write.table(effect2,file="effect.txt",sep="\t",col.names=TRUE,row.names=FALSE,de
 #repeat for all pairwise comparisons of interest
 
 #heatmap differential abundance
-table3_clr<-aldex.clr(Genera_NA, conds = hostlocation, mc.samples = 1000, denom=rclr, verbose=TRUE)
-table8<-lapply(X=table3_clr@analysisData, FUN=rowMeans)
+table3_clr_heat<-aldex.clr(Genera_NA, conds = hostlocation, mc.samples = 1000, denom=rclr, verbose=TRUE)
+table8<-lapply(X=table3_clr_heat@analysisData, FUN=rowMeans)
 table8<-as.data.frame(table8)
 table8<-table8[c("Acinetobacter", "Acetobacter", "Enterobacter", "Enterobacteriaceae_NA11", "Enterobacteriaceae_NA6", "Enterobacteriaceae_NA13", "Enterobacteriaceae_NA14", "Empedobacter", "Anaerosinus", "Anaerosporobacter", "Citrobacter", "Devosia", "Allorhizobium-Pararhizobium-Neorhizobium-Rhizobium", "Gluconobacter", "Leucobacter", "Ketogulonicigenium", "Lactococcus", "Novosphingobium", "Pantoea", "Peredibacter", "Pseudomonas", "Rahnella", "Tatumella", "Sphingobacterium"),]
 host_plant_family<-c(rep("Solanaceae", 6), rep("Cucurbitaceae", 12), rep("Solanaceae", 6), rep("Cucurbitaceae", 12))
@@ -489,17 +519,20 @@ host_df<-as.data.frame(host_df)
 levels(host_df$host)<-c("C. grandis", "C. sativa", "S. melongela")
 color_heat = list(host = c("S. melongela" = "black", "C. grandis"="red", "C. sativa"="green"))
 newnames <- lapply(rownames(table8), function(x) bquote(italic(.(x))))
+table10<-table8[c("Acinetobacter", "Acetobacter", "Enterobacter", "Enterobacteriaceae_NA11", "Enterobacteriaceae_NA6", "Enterobacteriaceae_NA13", "Enterobacteriaceae_NA14", "Empedobacter", "Anaerosinus", "Anaerosporobacter", "Citrobacter", "Devosia", "Allorhizobium-Pararhizobium-Neorhizobium-Rhizobium", "Gluconobacter", "Leucobacter", "Ketogulonicigenium", "Lactococcus", "Novosphingobium", "Pantoea", "Peredibacter", "Pseudomonas", "Rahnella", "Tatumella", "Sphingobacterium"),]
 pheatmap(table10, cutree_cols = 6, main = "Heatmap Most Differentially Abundant Genera Host", annotation_col = host_df, annotation_colors = color_heat, labels_row = as.expression(newnames))
 
 #boxplots differential abundance
+tableprop<-t(prop.table(Genera_NA[,c(7:46, 52:66)], margin = 2))
+table10prop<-tableprop[,c("Acinetobacter", "Acetobacter", "Enterobacter", "Enterobacteriaceae_NA11", "Enterobacteriaceae_NA6", "Enterobacteriaceae_NA13", "Enterobacteriaceae_NA14", "Empedobacter", "Anaerosinus", "Anaerosporobacter", "Citrobacter", "Devosia", "Allorhizobium-Pararhizobium-Neorhizobium-Rhizobium", "Gluconobacter", "Leucobacter", "Ketogulonicigenium", "Lactococcus", "Novosphingobium", "Pantoea", "Peredibacter", "Pseudomonas", "Rahnella", "Tatumella", "Sphingobacterium")]
 p1<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Acinetobacter") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
-p2<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Acetobacter") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
-p3<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Allorhizobium-Pararhizobium_Neorhizobium_Rhizobium") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
-p4<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Anaerosinus") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
-p5<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Enterobacter") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
-p6<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Enterobacteriaceae_NA11") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
-p7<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Enterobacteriaceae_NA13") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
-p8<-ggplot(table10prop, aes(x=location, y=Acinetobacter, fill=location)) + geom_boxplot() + ggtitle("Rahnella") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p2<-ggplot(table10prop, aes(x=location, y=Acetobacter, fill=location)) + geom_boxplot() + ggtitle("Acetobacter") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p3<-ggplot(table10prop, aes(x=location, y=Allorhizobium-Pararhizobium-Neorhizobium-Rhizobium, fill=location)) + geom_boxplot() + ggtitle("Allorhizobium-Pararhizobium_Neorhizobium_Rhizobium") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p4<-ggplot(table10prop, aes(x=location, y=Anaerosinus, fill=location)) + geom_boxplot() + ggtitle("Anaerosinus") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p5<-ggplot(table10prop, aes(x=location, y=Enterobacter, fill=location)) + geom_boxplot() + ggtitle("Enterobacter") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p6<-ggplot(table10prop, aes(x=location, y=Enterobacteriaceae_NA11, fill=location)) + geom_boxplot() + ggtitle("Enterobacteriaceae_NA11") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p7<-ggplot(table10prop, aes(x=location, y=Enterobacteriaceae_NA13, fill=location)) + geom_boxplot() + ggtitle("Enterobacteriaceae_NA13") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
+p8<-ggplot(table10prop, aes(x=location, y=Rahnella, fill=location)) + geom_boxplot() + ggtitle("Rahnella") + ylab("Relative Abundance") + xlab("Population") + facet_grid(. ~ host[c(25:57)]) + scale_fill_discrete(name = "Population") + theme(strip.text.x = element_text(face="italic")) + theme(plot.title=element_text(face="italic"))
 ggarrange(p1, p2, p3, p4, p5, p6, p7, p8, labels = c("A", "B", "C", "D", "E", "F", "G", "H"), ncol = 2, nrow = 4)
 
 ```
