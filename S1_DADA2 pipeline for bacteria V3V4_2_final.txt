@@ -287,7 +287,7 @@ writeXStringSet(Aligned_seq_rarified,"Aligned_seq_reunion2019_fasta")
 system("FastTree -gtr -nt Aligned_seq_rarified_fasta > Aligned_tree_rarified")
 
 # Load in the unrooted tree (requires ape)
-tree_reunion2019_unrooted<-read.tree("Aligned_tree_reunion2019")
+tree_reunion2019_unrooted<-read.tree("Aligned_tree_reunion2019_test2")
 
 # Check if the tree is fine (unrooted)
 # tree_unrooted
